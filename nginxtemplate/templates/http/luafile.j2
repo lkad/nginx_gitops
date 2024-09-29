@@ -1,0 +1,13 @@
+
+{% macro render_lua_package_path(luaconfig) %}
+    {%- if luaconfig.enable -%}
+        {%- set unique_paths = [] -%}
+        {%- for item in luaconfig.paths -%}
+            {%- if item.path not in unique_paths -%}
+                {%- set _ = unique_paths.append(item.path) -%}
+            {%- endif -%}
+        {%- endfor -%}
+        {# lua_package_path: '{{ unique_paths | join(';') }};;' #}
+        lua_package_path '{% for item in unique_paths %}{{ item.rsplit('/', 1)[0] }}/?.lua{% if not loop.last %};{% endif %}{% endfor %};;';
+    {%- endif -%}
+{% endmacro %}

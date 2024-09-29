@@ -1,0 +1,53 @@
+    
+#@ load("@ytt:overlay", "overlay")
+#@overlay/match by=overlay.all, expects="1+"
+---
+nginx_config_http_template:
+#@overlay/match by=overlay.subset({"deployment_location": "/app/openresty/nginx/conf/servers/ad/ad.conf"})
+- backup: false
+  config: 
+    upstreams: 
+#!  #@overlay/match by=overlay.subset({"name": "ad-Server-gw"})
+  #@overlay/match by="name"
+    - name: ad-Server-gw
+    #@overlay/replace
+      servers: 
+        - address: 111.111.111:88
+    #@overlay/match by="name"
+    - name: ad-Server_gray
+    #@overlay/replace
+      servers: 
+        - address: 111.111.111:99
+        - address: xxx.xxx.xxx:33
+    map:
+      mappings:
+      #@overlay/match by="string"
+      - string: $COOKIE_userName
+        #@overlay/replace
+        content: 
+          - value: '~*test$'
+            new_value: ad-Server_gray
+          - value: '~*13922test$'
+            new_value: 'ad-Server_gray'
+          - value: default
+            new_value: ad-Server_gray
+    
+    servers:
+    #@overlay/match by=overlay.index(0)      
+    - locations: 
+      #@overlay/match by="location"
+      - location : "/"
+        proxy: 
+          set_header: 
+            #@overlay/match by=overlay.subset({"field": "Host"})
+          - value: "adpro.xx.xxx"
+      core: 
+        #@overlay/replace
+        listen:          
+          - address: 0.0.0.0
+            port: 80
+        #@overlay/replace        
+        server_name: 
+          - adpro.xx.xxx 
+          - 10.8.12.3
+

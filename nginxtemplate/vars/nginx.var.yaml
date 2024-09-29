@@ -1,0 +1,146 @@
+---
+nginx_config_main_template_enable: true
+nginx_config_main_template:
+  template_file: nginx.conf.j2
+  deployment_location: /app/openresty/nginx/nginx.conf
+  static_path: otherfiles/{{group_names}}/static
+  backup: true
+  config:
+    main:  
+      # load_module: modules/ngx_http_js_module.so  # 加载模块.so
+      #   - modules/ngx_http_js_module.so
+      user:  # nginx 
+        username: mwopr  
+        # group: nginx
+
+      worker_processes: 12  # Number or 'auto'
+      # worker_rlimit_core: 1m
+      worker_rlimit_nofile: 131072  # Number
+      error_log:  # /var/log/nginx/error.log  # String, a list of strings, a dictionary, or a list of dictionaries. The 'file' variable is only required when setting a 'level'.
+        file: /app/openresty/nginx/logs/error.log  
+        level: crit
+        # - /var/log/nginx/error.log
+        # - file: /var/log/nginx/error.log  
+        #   level: notice
+      pid: /app/openresty/nginx/logs/nginx.pid
+      # daemon: true  # Boolean
+      # debug_points: abort  # Can be set to 'abort' or 'stop'
+      # env:  # MALLOC_OPTIONS  # String, a list of strings, a dictionary, or a list of dictionaries. The 'variable' variable is only required when setting a 'value'.
+      #   variable: PERL5LIB  # Required
+      #   value: /data/site/modules
+      #   - MALLOC_OPTIONS
+      #   - variable: PERL5LIB  # Required
+      #     value: /data/site/modules
+      # lock_file: logs/nginx.lock
+      # master_process: true  # Boolean
+      # pcre_jit: false  # Boolean
+      # ssl_engine: device
+      # thread_pool:  # Dictionary or a list of dictionaries
+      #   - name: default  # Required
+      #     threads: 32  # Required boolean
+      #     max_queue: 65536  # Boolean
+      # timer_resolution: 1s
+      # working_directory: /etc/nginx
+    events:  # Configure NGINX events
+      use: epoll
+      worker_connections: 102400  # Number
+    # include:  # String or a list of strings
+    #   - /etc/nginx/modules.conf
+    http:
+      undefined_directives:
+        - "lua_shared_dict host_rate_store 1m;"
+        - "lua_shared_dict host_lock_store 1m;"
+      gzip:
+        enable: on
+        types:
+          - text/plain
+          - application/x-javascript
+          - application/javascript
+          - text/css
+          - application/json
+      core:  # Configure NGINX HTTP core directives
+        default_type: application/octet-stream  
+        sendfile: on  # Boolean 
+        tcp_nopush: on    
+        keepalive_timeout: '180'
+        client_max_body_size: 100m
+        gzip: on
+        underscores_in_headers: on
+        server_tokens: false 
+
+      include:  
+        - /app/openresty/nginx/conf/servers/*.conf
+        - /app/openresty/nginx/conf/servers/*/*.conf
+        - mime.types;
+      log: 
+        format:  
+          - name: main  
+            escape: None  
+            format: |  
+              '{"@timestamp":"$time_iso8601",'
+                '"host":"$hostname",'
+                '"server_ip":"$server_addr",'
+                '"client_ip":"$remote_addr",'
+                '"client_port":"$remote_port",'
+                '"xff":"$http_x_forwarded_for",'
+                '"domain":"$host",'
+                '"url":"$uri",'
+                '"referer":"$http_referer",'
+                '"args":"$args",'
+                '"upstreamtime":"$upstream_response_time",'
+                '"responsetime":"$request_time",'
+                '"request_method":"$request_method",'
+                '"status":"$status",'
+                '"size":"$body_bytes_sent",'
+                '"request_body":"-",'
+                '"request_length":"$request_length",'
+                '"protocol":"$server_protocol",'
+                '"upstreamhost":"$upstream_addr",'
+                '"file_dir":"$request_filename",'
+                '"http_user_agent":"$http_user_agent",'
+                '"rate_limit_wait_time":"$http_rate_limit_wait_time",'
+                '"rate_limit_avail_num":"$http_rate_limit_avail_num",'
+                '"rate_limit_tick_num":"$http_rate_limit_tick_num",'
+                '"rate_limit_limit_num":"$http_rate_limit_limit_num",'
+                '"rate_limit_gray_hash":"$http_rate_limit_gray_hash"'
+              '}'
+          - name: mainv2  
+            escape: None  
+            format: |
+              '$remote_addr $remote_user [$time_local] "$request" "$request_body" $status $body_bytes_sent'
+                '"$http_referer" "$http_user_agent" "$cookie_JSESSIONID"  "$upstream_addr"' 
+          - name: buglog  
+            escape: None  
+            format: |
+              '$remote_addr $remote_user [$time_local] "$request" "$request_body" $status $body_bytes_sent "$http_referer" "$http_user_agent" "$cookie_JSESSIONID"'
+        # access:  # false  # Can alternatively be set to 'false'
+        #   - path: /var/log/nginx/access.log  # Required
+        #     format: main
+        #     buffer: 1m
+        #     gzip: 5  # Number -- Can alternatively be set to 'true'
+        #     flush: 10h
+        #     if: $loggable
+        # error:  # /var/log/nginx/error.log  # String, a list of strings, a dictionary, or a list of dictionaries. The 'file' variable is only required when setting a 'level'. This directive originally belongs to the NGINX core module, but we are making an exception.
+        #   file: /var/log/nginx/error.log  # Required
+        #   level: notice
+        #   # - /var/log/nginx/error.log
+        #   # - file: /var/log/nginx/error.log  # Required
+        #   #   level: notice
+        # open_log_file_cache:  # Set to 'false' to set to 'off'
+        #   max: 1000  # Required
+        #   inactive: 20s
+        #   min_uses: 2  # Number
+        #   valid: 1m
+    stream:
+      log: 
+        format:  
+          - name: main  
+            escape: None  
+            format: | 
+              '$remote_addr [$time_local] $protocol $status $bytes_received '
+                 '$bytes_sent $upstream_addr $upstream_connect_time '
+                 '$upstream_first_byte_time $upstream_session_time $session_time'
+      include: /app/openresty/nginx/conf/tcp_server/*.conf  # String or a list of strings
+    # quic:
+    #   bpf: false  # Boolean
+

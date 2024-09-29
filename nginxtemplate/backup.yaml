@@ -1,0 +1,78 @@
+- name: Backup and Restore Directories with Archive and Verification
+  hosts: localhost
+  remote_user: root
+  become: yes  
+  vars:
+    backup_dirs:
+      - /app/openresty/lualib
+      - /app/openresty/nginx/conf
+    backup_dest: /backup/location
+    max_backups: 5
+
+  tasks:
+    - name: Ensure backup directory exists
+      ansible.builtin.file:
+        path: "{{ backup_dest }}"
+        state: directory
+
+    - name: Create backup archives
+      ansible.builtin.archive:
+        path: "{{ item }}"
+        dest: "{{ backup_dest }}/{{ item | basename }}_{{ ansible_date_time.iso8601 }}.tar.gz"
+        format: gz
+      with_items: "{{ backup_dirs }}"
+      register: backup_files
+
+    - name: Limit backups to the last 5
+      ansible.builtin.find:
+        paths: "{{ backup_dest }}"
+        patterns: "{{ item | basename }}_*.tar.gz"
+      with_items: "{{ backup_dirs }}"
+      register: find_results
+    - name: Display variable only if verbosity level is 2 or higher
+      debug:
+        var: find_results
+
+    - name: Remove old backups
+      ansible.builtin.command:
+        cmd: |
+          ls -t {{ item.files | map(attribute='path') | join(' ') }} | tail -n +{{ max_backups | int + 1 }} | xargs rm -f
+      with_items: "{{ find_results.results }}"
+      # when: item.matched > max_backups
+
+    - name: Calculate initial MD5 checksums before tasks
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        checksum: md5
+      with_items: "{{ backup_dirs }}"
+      register: pre_task_checksums
+
+    - name: Execute your tasks
+      ansible.builtin.shell: |
+        # Your tasks go here
+      register: task_result
+      failed_when: task_result.rc != 0
+
+    - name: Restore from backup if a task fails
+      ansible.builtin.unarchive:
+        src: "{{ item }}"
+        dest: "/"
+      with_items: "{{ backup_files.results | map(attribute='dest') }}"
+      when: task_result is failed
+
+    - name: Calculate MD5 checksums after restore
+      ansible.builtin.stat:
+        path: "{{ item.item }}"
+        checksum: md5
+      with_items: "{{ pre_task_checksums.results }}"
+      register: post_restore_checksums
+      when: task_result is failed
+
+    - name: Verify if restore was successful
+      ansible.builtin.debug:
+        msg: "MD5 checksum mismatch after restore for {{ item.item }}! Restoration failed."
+      when: item.stat.checksum != post_restore_checksums.results[index].stat.checksum
+      loop: "{{ pre_task_checksums.results }}"
+      loop_control:
+        index_var: index
+      when: task_result is failed

@@ -1,0 +1,148 @@
+---
+- hosts: all
+  remote_user: root
+  serial: 1  
+  vars:
+    backup_dir: "/backups/openresty/"
+    backup_src: "/app/openresty/nginx/conf/"
+    backup_dir2: "/backups/openresty/"
+    backup_src2: "/app/openresty/lualib/"
+    max_backups: 5  # 要保留的最大备份数量
+    task_name_failed: ""  # 用于记录失败的任务名称
+    config_changed: false  # 用于跟踪配置是否有变更
+
+  tasks:
+
+  - name: Load group vars for environment
+    include_vars:
+      file: "{{ nginxvarfile }}"
+  - name: Create backup dir
+    ansible.builtin.file:
+      path: "{{ backup_dir }}"
+      state: directory
+      mode: "0755"
+
+  - name: Create a timestamped backup of {{ backup_src }} directory
+    archive:
+      path: "{{ backup_src }}"
+      dest: "{{ backup_dir }}www_backup_{{ ansible_date_time.date }}_{{ ansible_date_time.time }}.tar.gz"
+      format: gz
+  - name: Create a timestamped backup of {{ backup_src }} directory
+    archive:
+      path: "{{ backup_src2 }}"
+      dest: "{{ backup_dir }}lualib_backup_{{ ansible_date_time.date }}_{{ ansible_date_time.time }}.tar.gz"
+      format: gz
+  - name: Find existing backups
+    find:
+      paths: "{{ backup_dir }}"
+      patterns: "www_backup_*.tar.gz"
+    register: backup_files
+  - name: Find existing lualib backups
+    find:
+      paths: "{{ backup_dir }}"
+      patterns: "lualib_backup_*.tar.gz"
+    register: backup_files2
+
+  - name: Sort backups by modification time
+    set_fact:
+      sorted_backups: "{{ backup_files.files | sort(attribute='mtime', reverse=true) }}"
+  - name: Sort lualib backups by modification time
+    set_fact:
+      sorted_backups2: "{{ backup_files2.files | sort(attribute='mtime', reverse=true) }}"
+
+  - name: Remove old backups, keeping only the latest {{ max_backups }} backups
+    file:
+      path: "{{ item.path }}"
+      state: absent
+    with_items: "{{ sorted_backups[max_backups:] }}"
+    when: backup_files.matched > max_backups
+  - name: Remove old lualib backups, keeping only the latest {{ max_backups }} backups
+    file:
+      path: "{{ item.path }}"
+      state: absent
+    with_items: "{{ sorted_backups2[max_backups:] }}"
+    when: backup_files2.matched > max_backups
+
+  - name: Ensure NGINX main directory exists
+    ansible.builtin.file:
+      path: "{{ nginx_config_main_template['deployment_location'] | default('/etc/nginx') | dirname }}"
+      state: directory
+      mode: "0755"
+    when: nginx_config_main_template_enable | bool
+
+  - name: Dynamically generate NGINX main configuration file
+    ansible.builtin.template:
+      src: "{{ nginx_config_main_template['template_file'] | default('nginx.conf.j2') }}"
+      dest: "{{ nginx_config_main_template['deployment_location'] | default('/etc/nginx/nginx.conf') }}"
+      backup: "{{ nginx_config_main_template['backup'] | default(true) }}"
+      mode: "0644"
+    when: nginx_config_main_template_enable | bool 
+    notify: restart nginx
+
+  - name: Copy static config
+    ansible.builtin.copy:
+      src: "{{ item['srcpath'] }}/"
+      dest: "{{ item['dstpath'] }}/"
+      mode: '0755'
+      directory_mode: '0755'
+    loop: "{{ nginx_config_main_template.copy_fils }}"
+    # when: nginx_config_main_template.copy_fils is difend 
+
+  - name: chek file md5 
+    block:
+        - name: Check MD5 sums of Lua files
+          shell: "md5sum {{ item.path }} | awk '{print $1}'"
+          register: md5_result
+          with_items: "{{ nginx_config_main_template.config.http.luafile.paths }}"
+          when: item.md5 is defined
+        - name: Debug md5_result
+          debug:
+            var: md5_result
+        - name: Validate MD5 sums
+          fail:
+            msg: "MD5 sum mismatch for {{ item.item.path | lower }}. Expected {{ item.item.md5 }}, got {{ item.stdout }}"
+          when:  item.item.md5 is  defined and item.stdout | lower != item.item.md5 | lower 
+          loop: "{{ md5_result.results }}"
+    rescue: 
+    - name: Rollback NGINX config from backup
+      unarchive:
+        src: "{{ backup_dir }}www_backup_{{ ansible_date_time.date }}_{{ ansible_date_time.time }}.tar.gz"
+        dest: "{{ backup_src }}"
+        remote_src: yes
+    - name: Rollback lualib   from backup
+      unarchive:
+        src: "{{ backup_dir }}lualib_backup_{{ ansible_date_time.date }}_{{ ansible_date_time.time }}.tar.gz"
+        dest: "{{ backup_src2 }}"
+        remote_src: yes
+    # - name: Restart nginx after rollback
+    #   shell: |
+    #     /app/openresty/nginx/sbin/nginx -s reload
+    - name: task failed,rollback ok         
+      ansible.builtin.fail:
+        msg: nginx config update is err,please check and try agian
+    when:  nginx_config_main_template['config']['http']['luafile']['enable']
+
+
+
+  - name: Include tasks for each vars file
+    include_tasks:
+      file: "tasks/deploy_nginx_config.yml"
+    with_items: "{{ httpfile }}"
+    loop_control:
+      loop_var: vars_file
+  - meta: flush_handlers
+  - name: Say Hello
+    ansible.builtin.debug:
+      msg: "Hello, Ansible!"
+  - name: urlchecks
+    include_tasks:
+      file: "tasks/urlcheck.yaml"
+    with_items: "{{ httpfile }}"
+    loop_control:
+      loop_var: vars_file
+
+  handlers:
+    - name: restart nginx
+      shell: |
+        {{ nginx_config_main_template.nginx_bin_location | default('/app/openresty/nginx/sbin/nginx') }} -s reload 
+      when: config_changed  # 只在配置有变更时执行

@@ -1,0 +1,73 @@
+---
+- hosts: all
+  remote_user: root
+  # become: yes
+  # # serial: 1  
+  vars:
+    backup_dir: "/backups/openresty/"
+    backup_src: "/app/openresty/nginx/conf/"
+    backup_dir2: "/backups/openresty/"
+    backup_src2: "/app/openresty/lualib/"
+    max_backups: 5  # 要保留的最大备份数量
+    task_name_failed: ""  # 用于记录失败的任务名称
+    config_changed: false  # 用于跟踪配置是否有变更
+
+  tasks:
+
+  - name: Load group vars for environment
+    include_vars:
+      file: "{{ nginxvarfile }}"
+  - name: Ensure NGINX main directory exists
+    ansible.builtin.file:
+      path: "/tmp/{{ nginx_config_main_template['deployment_location'] | default('/tmp/etc/nginx') | dirname }}"
+      state: directory
+      mode: "0755"
+    when: nginx_config_main_template_enable | bool
+  - name: Dynamically generate NGINX main configuration file
+    ansible.builtin.template:
+      src: "{{ nginx_config_main_template['template_file'] | default('nginx.conf.j2') }}"
+      dest: "/tmp/{{ nginx_config_main_template['deployment_location'] | default('/tmp/etc/nginx/nginx.conf') }}"
+      backup: "{{ nginx_config_main_template['backup'] | default(true) }}"
+      mode: "0644"
+    when: nginx_config_main_template_enable | bool 
+
+  - name: cat git nginxmain   config 
+    command: "cat /tmp/{{ nginx_config_main_template['deployment_location'] }} "
+
+    register: nginxmain_output  
+    when: nginx_config_main_template_enable | bool   
+  - name: git main config is 
+    debug:
+      var: nginxmain_output.stdout_lines 
+
+  - name: diff nginx main  config 
+    command:
+      diff "/tmp/{{ nginx_config_main_template['deployment_location'] }}"  {{ nginx_config_main_template['deployment_location'] }}
+
+  - name: chek file md5 
+    block:
+        - name: Check MD5 sums of Lua files
+          shell: "md5sum {{ item.path }} | awk '{print $1}'"
+          register: md5_result
+          with_items: "{{ nginx_config_main_template.config.http.luafile.paths }}"
+          when: item.md5 is defined
+        # - name: Debug md5_result
+        #   debug:
+        #     var: md5_result
+        - name: Validate MD5 sums
+          fail:
+            msg: "MD5 sum mismatch for {{ item.item.path | lower }}. Expected {{ item.item.md5 }}, got {{ item.stdout }}"
+          when:  item.item.md5 is  defined and item.stdout | lower != item.item.md5 | lower 
+          loop: "{{ md5_result.results }}"
+
+
+  - name: Include tasks for each vars file
+    include_tasks:
+      file: "tasks/check_nginx_config.yml"
+    with_items: "{{ httpfile }}"
+    loop_control:
+      loop_var: vars_file
+  - meta: flush_handlers
+  - name: Say Hello
+    ansible.builtin.debug:
+      msg: "Hello, Ansible!"

@@ -1,0 +1,10 @@
+
+[lktest]
+10.204.53.42
+10.204.53.43
+#localhost 
+[lktest:vars]
+
+#httpfile=["vars/instances/ad/test/test.http.sh","vars/instances/ad/pro/pro.http.sh"]
+httpfile=["vars/instances/ad/test/test.http.sh"]
+nginxvarfile="group_vars/pro/lktest.yml"

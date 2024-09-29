@@ -1,0 +1,78 @@
+
+{% if nginx_config_main_template['config']['main'] is defined %}
+{% from 'core.j2' import main with context %}
+{{ main(nginx_config_main_template['config']['main']) }}
+{%- endif %}
+
+{% if nginx_config_main_template['config']['include'] is defined and nginx_config_main_template['config']['include'] is not mapping %}
+{% for file in nginx_config_main_template['config']['include'] if nginx_config_main_template['config']['include'] is not string %}
+include {{ file }};
+{% else %}
+include {{ nginx_config_main_template['config']['include'] }};
+{% endfor %}
+{%- endif %}
+
+events {
+{% if nginx_config_main_template['config']['events'] is defined %}
+{% from 'core.j2' import events with context %}
+{% filter indent(4) %}
+    {{ events(nginx_config_main_template['config']['events']) }}
+{%- endfilter %}
+{% endif %}
+}
+
+{% if nginx_config_main_template['config']['http'] is defined %}
+http {
+{% if nginx_config_main_template['config']['http']['log'] is defined %}
+{% from 'http/modules.j2' import log with context %}
+{{ log(nginx_config_main_template['config']['http']['log']) }}
+{%- endif %}
+
+{% if nginx_config_main_template['config']['http']['core'] is defined %}
+{% from 'http/core.j2' import core with context %}
+{{ core(nginx_config_main_template['config']['http']['core']) }}
+{%- endif %}
+
+{% if nginx_config_main_template['config']['http']['gzip'] is defined %}
+{% from 'http/modules.j2' import gzip with context %}
+{{ gzip(nginx_config_main_template['config']['http']['gzip']) }}
+{%- endif %}
+
+{% if nginx_config_main_template['config']['http']['undefined_directives'] is defined %}
+{% from 'http/modules.j2' import undefined_directives with context %}
+{{ undefined_directives(nginx_config_main_template['config']['http']['undefined_directives']) }}
+{%- endif %}
+
+{% if nginx_config_main_template['config']['http']['luafile'] is defined and nginx_config_main_template['config']['http']['luafile']['enable']  %}
+{% from 'http/luafile.j2' import render_lua_package_path with context %}
+{{ render_lua_package_path(nginx_config_main_template['config']['http']['luafile']) }}
+{%- endif %}
+
+{% if nginx_config_main_template['config']['http']['include'] is defined and nginx_config_main_template['config']['http']['include'] is not mapping %}
+{% for file in nginx_config_main_template['config']['http']['include'] if nginx_config_main_template['config']['http']['include'] is not string %}
+    include {{ file }};
+{% else %}
+    include {{ nginx_config_main_template['config']['http']['include'] }};
+{% endfor %}
+{% endif %}
+}
+{% endif %}
+
+{% if nginx_config_main_template['config']['stream'] is defined %}
+stream {
+
+
+{% if nginx_config_main_template['config']['stream']['log'] is defined %}
+{% from 'http/modules.j2' import log with context %}
+{{ log(nginx_config_main_template['config']['stream']['log']) }}
+{%- endif %}
+
+{% if nginx_config_main_template['config']['stream']['include'] is defined and nginx_config_main_template['config']['stream']['include'] is not mapping %}
+{% for file in nginx_config_main_template['config']['stream']['include'] if nginx_config_main_template['config']['stream']['include'] is not string %}
+    include {{ file }};
+{% else %}
+    include {{ nginx_config_main_template['config']['stream']['include'] }};
+{% endfor %}
+{% endif %}
+}
+{% endif %}

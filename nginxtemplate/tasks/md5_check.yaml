@@ -1,0 +1,51 @@
+  gather_facts: no
+  vars:
+    nginx_config_http_template:
+    - config:       
+        servers: 
+          - core:
+              listen:
+                - address: "*"
+                  port: 443
+                  ssl: true
+              server_name: 
+                - ad.xx.xxx 
+                - 111.230.82.60
+              check_path:
+                - /test
+                - /
+          - core:
+              listen:
+                - address: "*"
+                  port: 80
+                  ssl: false
+              server_name: 
+                - ad.xx.xxx 
+                - 111.230.82.60
+              check_path:
+                - /aaa
+                - /
+    - config:       
+        servers: 
+          - core:
+              listen:
+                - address: "*"
+                  port: 1443
+                  ssl: true
+              server_name: 
+                - ad.xx.xxx 
+                - 111.230.82.60
+              check_path:
+                - /cc
+                - /
+          - core:
+              listen:
+                - address: "*"
+                  port: 180
+                  ssl: false
+              server_name: 
+                - ad.xx.xxx 
+                - 111.230.82.60
+              check_path:
+                - /bb
+                - /

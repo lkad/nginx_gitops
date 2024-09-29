@@ -1,0 +1,276 @@
+
+nginx_config_http_template_enable: true
+nginx_config_http_template:
+  - template_file: ../templates/http/default.conf.j2
+    deployment_location: "/app/openresty/nginx/conf/servers/ad/ad_https.conf"
+    backup: true
+    config: 
+      upstreams:  # Configure upstreams
+        - name: ad-https-Server-gw   # Required
+          servers:  # Cannot be used if 'state' directive is defined
+            - address: 10.204.176.10:180  # Required -- You can use an IP address, a Unix socket, or a domain -- include port details inline if necessary
+          hash:  # You can only set one load balancing method -- 'round_robin' is used if no method is specified
+            key: '$cookie_jsessionid'  # Required
+            consistent: false  # Boolean
+        - name: ad-https-Server_gray
+          ip_hash: true
+          servers: 
+            - address: 10.204.66.57:8080 
+        - name: ad-https-Server
+          hash:  
+            key: '$cookie_jsessionid'  
+            consistent: false 
+          servers: 
+            - address: 10.204.176.4:80
+            - address: 10.204.176.5:80
+            - address: 10.204.176.1:80
+            - address: 10.204.176.2:80
+            - address: 10.204.176.3:80
+        - name: ad-https-Server-roundr
+          servers: 
+            - address: 10.204.176.4:80
+            - address: 10.204.176.5:80
+            - address: 10.204.176.1:80
+            - address: 10.204.176.2:80
+            - address: 10.204.176.3:80
+      map:  # Configure maps -- Available only in the 'http' context
+        # hash_bucket_size: 64
+        # hash_max_size: 2048
+        mappings:  # List of dictionaries
+          - string: $COOKIE_userName # Required
+            variable: $group  # Required
+            hostnames: false  # Boolean
+            volatile: false  # Boolean
+            content:  # Dictionary or list of dictionaries
+              - value: '~*fengxueyun$'
+                new_value: ad-https-Server_gray
+              - value: '~*13922808010$'
+                new_value: 'ad-https-Server_gray'
+              - value: default
+                new_value: ad-https-Server
+      servers:  # All previous modules are also available (when allowed) in the 'servers' and 'locations' contexts.
+        - locations:
+            - location: /
+              undefined_directives: 
+                - |
+                  access_by_lua_block {
+                    local rate_limit = require "resty.limit.rate_limit"
+                    local lim, err = rate_limit.new("host_rate_store", 1000, 1, 1300, 1000, true, "host_lock_store")
+                    local key = ngx.var.host
+                    lim:incoming_gray(key, 100)
+                    }
+              proxy:                
+                pass: "http://ad-https-Server-gw"
+                set_header:
+                  - field: Host
+                    value: "ad.xx.xxx"
+                  - field: X-Real-IP
+                    value: $remote_addr
+                  - field: X-Forwarded-For
+                    value: $proxy_add_x_forwarded_for
+                  - field: X-Forwarded-Proto
+                    value: https
+                  - field: Cookie
+                    value: $http_cookie
+                  - field: Upgrade
+                    value: $http_upgrade
+                  - field: Connection
+                    value: "upgrade"
+                read_timeout:  600s
+                cookie_path: 
+                  path: /ad-Server/
+                  replacement: /
+            - location: ~  ^(/ad/boxAdExposureUpload|/ad/boxTmall|/ad/boxCenter|/ad/boxPoint|/ad/box|/ad/test/html|/ad/test|/com.fcbox.ad.facade.common.FileMD5Facade|/com.fcbox.ad.facade.common.UploadFileFacade)
+              undefined_directives: 
+                - |
+                  if ( $cookie_jsessionid = "" )
+                  {
+                  set $group 'ad-https-Server-roundr';
+                  }
+                - |
+                  access_by_lua_block {
+                    local rate_limit = require "resty.limit.rate_limit"
+                    local lim, err = rate_limit.new("host_rate_store", 1000, 1, 1300, 1000, true, "host_lock_store")
+                    local key = ngx.var.host
+                    lim:incoming_gray(key, 100)
+                    }
+              proxy:                
+                pass: http://$group
+                set_header:
+                  - field: Host
+                    value: "ad.xx.xxx"
+                  - field: X-Real-IP
+                    value: $remote_addr
+                  - field: X-Forwarded-For
+                    value: $proxy_add_x_forwarded_for
+                  - field: X-Forwarded-Proto
+                    value: https
+                  - field: Cookie
+                    value: $http_cookie
+                  - field: Upgrade
+                    value: $http_upgrade
+                  - field: Connection
+                    value: "upgrade"
+                read_timeout:  600s
+                cookie_path: 
+                  path: /ad-Server/
+                  replacement: /
+            - location: /favicon.ico 
+              core:
+                root: /app/openresty/nginx/html/ad.xx.xxx  
+            - location:  ~ .*\.(js|css|html|jpg|png|gif|swf|php|ttf|woff|woff2|pdf|svg)?$ 
+              core: 
+                root: /app/openresty/nginx/html/ad.xx.xxx
+              headers: 
+                expires: '-1'
+
+          core:  # Configure NGINX HTTP core directives
+            client_max_body_size: 100m
+            listen:  # Available only in the 'server' context
+              - address: "0.0.0.0" # Can also be a unix path
+                port: 443
+                ssl: true  # Boolean
+            server_name: 
+              - ad.xx.xxx 
+              - 111.230.82.60
+            check_path:
+              - /a.html
+              - /index.html             
+          ssl:  # Configure SSL
+            certificate: /app/openresty/nginx/conf/https/fcbox.pem  # String or a list of strings
+            certificate_key: /app/openresty/nginx/conf/https/fcbox.key  # String or a list of strings
+            protocols: 'TLSv1 TLSv1.1 TLSv1.2'  # String or a list of strings
+            ciphers: 'HIGH:!RC4:!MD5:!aNULL:!eNULL:!NULL:!DH:!EDH:!EXP:+MEDIUM'
+            prefer_server_ciphers: on 
+          proxy:  # Configure proxy settings
+            connect_timeout: 300
+            read_timeout: 150
+            send_timeout: 150
+
+          log:  # Configure logs        
+            access:  # false  # Can alternatively be set to 'false'
+              - path: /app/openresty/nginx/logs/ad_https_access.log  # Required
+                format: main
+
+            error:  # /var/log/nginx/error.log  # String, a list of strings, a dictionary, or a list of dictionaries. The 'file' variable is only required when setting a 'level'. This directive originally belongs to the NGINX core module, but we are making an exception.
+              file: /app/openresty/nginx/logs/ad_https_error.log  # Required
+        - locations:
+            - location: /
+              undefined_directives: 
+                - |
+                  access_by_lua_block {
+                    local rate_limit = require "resty.limit.rate_limit"
+                    local lim, err = rate_limit.new("host_rate_store", 1000, 1, 1300, 1000, true, "host_lock_store")
+                    local key = ngx.var.host
+                    lim:incoming_gray(key, 100)
+                    }
+              proxy:                
+                pass: "http://ad-https-Server-gw"
+                set_header:
+                  - field: Host
+                    value: "ad.xx.xxx"
+                  - field: X-Real-IP
+                    value: $remote_addr
+                  - field: X-Forwarded-For
+                    value: $proxy_add_x_forwarded_for
+                  - field: X-Forwarded-Proto
+                    value: https
+                  - field: Cookie
+                    value: $http_cookie
+                  - field: Upgrade
+                    value: $http_upgrade
+                  - field: Connection
+                    value: "upgrade"
+                read_timeout:  600s
+                cookie_path: 
+                  path: /ad-Server/
+                  replacement: /
+            - location: ~  ^(/ad/boxAdExposureUpload|/ad/boxTmall|/ad/boxCenter|/ad/boxPoint|/ad/box|/ad/test/html|/ad/test|/com.fcbox.ad.facade.common.FileMD5Facade|/com.fcbox.ad.facade.common.UploadFileFacade)
+              undefined_directives: 
+                - |
+                  if ( $cookie_jsessionid = "" )
+                  {
+                  set $group 'ad-https-Server-roundr';
+                  }
+                - |
+                  access_by_lua_block {
+                    local rate_limit = require "resty.limit.rate_limit"
+                    local lim, err = rate_limit.new("host_rate_store", 1000, 1, 1300, 1000, true, "host_lock_store")
+                    local key = ngx.var.host
+                    lim:incoming_gray(key, 100)
+                    }
+
+              add_headers:  # Can be a dictionary or a list of dictionaries
+                - name: 'Access-Control-Allow-Origin'  # Required
+                  value: '$http_origin'  # Required
+
+              proxy:                
+                pass: http://$group
+                set_header:
+                  - field: Host
+                    value: "ad.xx.xxx"
+                  - field: X-Real-IP
+                    value: $remote_addr
+                  - field: X-Forwarded-For
+                    value: $proxy_add_x_forwarded_for
+                  - field: X-Forwarded-Proto
+                    value: https
+                  - field: Cookie
+                    value: $http_cookie
+                  - field: Upgrade
+                    value: $http_upgrade
+                  - field: Connection
+                    value: "upgrade"
+
+                read_timeout:  600s
+                cookie_path: 
+                  path: /ad-Server/
+                  replacement: /
+            - location: /favicon.ico 
+              core:
+                root: /app/openresty/nginx/html/ad.xx.xxx  
+            - location:  ~ .*\.(js|css|html|jpg|png|gif|swf|php|ttf|woff|woff2|pdf|svg)?$ 
+              core: 
+                root: /app/openresty/nginx/html/ad.xx.xxx
+              headers: 
+                expires: '-1'
+
+          core:  # Configure NGINX HTTP core directives
+            client_max_body_size: 100m
+            listen:  # Available only in the 'server' context
+              - address: "0.0.0.0" # Can also be a unix path
+                port: 443
+                ssl: true  # Boolean
+            server_name: 
+              - ad2.xx.xxx 
+              - 111.230.82.61
+            check_path:
+              - /a.html
+              - /index.html 
+          gzip:
+            enable: on
+            types:
+              - text/plain
+              - application/x-javascript
+              - application/javascript
+              - text/css
+              - application/json            
+          ssl:  # Configure SSL
+            certificate: /app/openresty/nginx/conf/https/fcbox.pem  # String or a list of strings
+            certificate_key: /app/openresty/nginx/conf/https/fcbox.key  # String or a list of strings
+            protocols: 'TLSv1 TLSv1.1 TLSv1.2'  # String or a list of strings
+            ciphers: 'HIGH:!RC4:!MD5:!aNULL:!eNULL:!NULL:!DH:!EDH:!EXP:+MEDIUM'
+            prefer_server_ciphers: on 
+            ssl_session_timeout: 5m
+          proxy:  # Configure proxy settings
+            connect_timeout: 300
+            read_timeout: 150
+            send_timeout: 150
+
+          log:  # Configure logs        
+            access:  # false  # Can alternatively be set to 'false'
+              - path: /app/openresty/nginx/logs/ad_https_access.log  # Required
+                format: main
+
+            error:  # /var/log/nginx/error.log  # String, a list of strings, a dictionary, or a list of dictionaries. The 'file' variable is only required when setting a 'level'. This directive originally belongs to the NGINX core module, but we are making an exception.
+              file: /app/openresty/nginx/logs/ad_https_error.log

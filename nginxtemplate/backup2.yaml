@@ -1,0 +1,56 @@
+---
+- name: Backup and recovery of directories
+  hosts: localhost
+  remote_user: root
+  vars:
+    backup_dir: /var/backups
+    backup_prefix: "backup_"
+    max_backups: 5
+    directories_to_backup:
+      - /path/to/directory1
+      - /path/to/directory2
+      - /path/to/directory3
+
+  tasks:
+    - name: Ensure the backup directory exists
+      file:
+        path: "{{ backup_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Create backups for each directory
+      archive:
+        path: "{{ item }}"
+        dest: "{{ backup_dir }}/{{ backup_prefix }}{{ ansible_date_time.iso8601 }}.tar.gz"
+      loop: "{{ directories_to_backup }}"
+      register: backup_result
+
+    - name: Remove old backups to keep only the last {{ max_backups }} per directory
+      shell: |
+        find "{{ backup_dir }}" -maxdepth 1 -type f -name "{{ backup_prefix }}{{ item | basename }}*.tar.gz" -mtime +{{ max_backups }} -exec rm {} \;
+      loop: "{{ directories_to_backup }}"
+      ignore_errors: true
+
+    - name: Perform some task that might fail
+      shell: command-that-might-fail
+      ignore_errors: true
+      register: task_result
+
+    - name: Restore from backup if the previous task failed
+      block:
+        - name: Find the most recent backup
+          find:
+            paths: "{{ backup_dir }}"
+            patterns: "{{ backup_prefix }}{{ item | basename }}*.tar.gz"
+            age: "-1 days"
+            newest_first: true
+            file_type: file
+          register: find_result
+          loop: "{{ directories_to_backup }}"
+
+        - name: Extract the most recent backup to the original directory
+          unarchive:
+            src: "{{ find_result.files[0].path }}"
+            dest: "{{ item }}"
+          loop: "{{ directories_to_backup }}"
+      when: task_result.failed

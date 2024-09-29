@@ -1,0 +1,55 @@
+- name: get vars file 
+  local_action:
+    module: command
+    cmd: bash "{{ playbook_dir }}/{{ vars_file }}"
+  register: vars_file_output
+- name: Debug var
+  debug:
+    var: vars_file_output
+- name: 动态加载变量文件
+  set_fact:
+    httpiconfig:  "{{ vars_file_output.stdout  | from_yaml }}"
+- name: Retrieve NGINX core configuration
+  set_fact:
+    nginx_core: "{{ httpiconfig.nginx_config_http_template[0].config.servers[0].core }}"
+    listen_settings: "{{ nginx_core.listen | default([]) }}"
+    default_host: "localhost"
+
+- name: Set host from server_name or default to 'localhost'
+  set_fact:
+    host: "{{ nginx_core.server_name[0] | default(default_host) }}"
+
+- name: Loop through each listen setting and perform HTTP/HTTPS check
+  with_items: "{{ listen_settings }}"
+  loop_control:
+    label: "{{ item.address }}:{{ item.port }}"
+  tasks:
+    - name: Extract IP and port
+      set_fact:
+        ip: "{{ item.address | default('127.0.0.1') }}"
+        port: "{{ item.port | default(80) }}"
+
+    - name: Loop through each urlcheckpath and perform HTTP/HTTPS check
+      with_items: "{{ httpiconfig.nginx_config_http_template[0].urlcheckpath }}"
+      loop_control:
+        label: "{{ item.path }}"
+      tasks:
+        - name: Set path from urlcheckpath
+          set_fact:
+            path: "{{ item.path }}"
+
+        - name: Perform HTTP/HTTPS check
+          uri:
+            url: "{{ 'https' if item.ssl | default(false) else 'http' }}://{{ ip }}:{{ port }}{{ path }}"
+            headers:
+              Host: "{{ host }}"
+            validate_certs: no
+            status_code: 200
+          register: result
+          failed_when: result.status != 200
+
+        - name: Fail the task if the HTTP/HTTPS check fails
+          fail:
+            msg: "Check failed for host {{ host }} with IP {{ ip }} and port {{ port }} and path {{ path }}"
+          when: result.failed
+  when: nginx_core is defined and listen_settings is defined

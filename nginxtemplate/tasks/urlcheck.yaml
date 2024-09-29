@@ -1,0 +1,50 @@
+---
+
+
+  - name: get vars file 
+    local_action:
+      module: command
+      cmd: bash "{{ playbook_dir }}/{{ vars_file }}"
+    register: vars_file_output
+  - name: Debug var
+    debug:
+      var: vars_file_output
+  - name: 动态加载变量文件
+    set_fact:
+      httpiconfig:  "{{ vars_file_output.stdout  | from_yaml }}"
+
+  - name: Debug check data
+    debug:
+      msg: "{{ httpiconfig.nginx_config_http_template }}"
+  - name: Generate URLs for HTTP/HTTPS checks
+    set_fact:
+      urls: |
+        {%- set urls = [] -%}
+        {%- for inconfig in httpiconfig.nginx_config_http_template -%}
+        {%- for server in inconfig.config.servers -%}
+          {%- set core = server.core -%}
+          {%- for listen in core.listen -%}
+            {%- set address = listen.address -%}
+            {%- if address == '*' or address == '0.0.0.0' -%}
+              {%- set address = '127.0.0.1' -%}
+            {%- endif -%}
+             {%- if core.check_path is defined  -%}
+              {%- for path in core.check_path -%}
+                {%- for server_name in core.server_name -%}
+                  {%- set url = "http" + ("s" if listen.ssl else "") + "://" + address + ":" + listen.port|string + path -%}
+                  {%- set headers = {'Host': server_name} -%}
+                  {{ urls.append({'url': url, 'headers': headers}) }}
+                {%- endfor -%}
+              {%- endfor -%}
+             {%- endif -%} 
+          {%- endfor -%}
+        {%- endfor -%}
+        {%- endfor -%}
+        {{ urls }}
+  - name: Perform HTTP/HTTPS checks
+    uri:
+      url: "{{ item.url }}"
+      headers: "{{ item.headers }}"
+      validate_certs: no
+    loop: "{{ urls }}"
+    register: result
